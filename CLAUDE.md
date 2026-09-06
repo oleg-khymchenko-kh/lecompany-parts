@@ -121,8 +121,10 @@ so the browser never needs it.
 - MySQL still binds `*:3306` rather than 127.0.0.1. The firewall covers it. The
   bind-address change needs a mysqld restart, which briefly interrupts
   `app.lecompany.co.uk`, so it has not been done.
-- **The MySQL root password is sitting in `/root/.bash_history` in plaintext**,
-  which is how it was recovered. It should be rotated and the line removed.
+- The MySQL root password is in `/root/.bash_history` in plaintext, which is how
+  it was recovered. Raised with the owner on 2026-09-07; **they decided to leave
+  it.** Accepted, not outstanding — do not rotate it or edit the history file
+  without being asked.
 - The SendGrid key in `.env` is a **full-access** key, including
   `api_keys.create`. A restricted Mail-Send-only key would be safer.
 
