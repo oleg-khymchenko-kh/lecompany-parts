@@ -1,0 +1,225 @@
+// parts.lecompany.co.uk — data model
+//
+// Money is always stored in minor units (pence) as Int. Never Float.
+// Prisma 7 reaches MySQL through the mariadb driver adapter, so there is no
+// platform-specific query engine to ship. The connection URL lives in
+// prisma.config.ts for the CLI and in the adapter at runtime.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  runtime      = "nodejs"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+enum UserRole {
+  CUSTOMER
+  STAFF
+  ADMIN
+}
+
+model User {
+  id               String    @id @default(cuid())
+  email            String    @unique
+  // Null for accounts that have only ever used a magic link.
+  passwordHash     String?
+  name             String?
+  phone            String?
+  companyName      String?
+  role             UserRole  @default(CUSTOMER)
+  emailVerifiedAt  DateTime?
+  stripeCustomerId String?   @unique
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  sessions    Session[]
+  loginTokens LoginToken[]
+  orders      Order[]
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  // SHA-256 of the cookie value; the raw token is never stored.
+  tokenHash String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+  userAgent String?  @db.Text
+  ip        String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+enum LoginTokenPurpose {
+  MAGIC_LINK
+  EMAIL_VERIFY
+  PASSWORD_RESET
+}
+
+model LoginToken {
+  id        String            @id @default(cuid())
+  tokenHash String            @unique
+  userId    String
+  purpose   LoginTokenPurpose
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime          @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("login_tokens")
+}
+
+enum ProductKind {
+  PART
+  PCB_REPAIR
+  REFURBISHED
+}
+
+model Product {
+  id          String      @id @default(cuid())
+  sku         String      @unique
+  slug        String      @unique
+  kind        ProductKind
+  name        String
+  brand       String?
+  modelRef    String?
+  summary     String?     @db.Text
+  description String?     @db.Text
+  priceMinor  Int
+  currency    String      @default("GBP") @db.Char(3)
+  stock       Int         @default(0)
+  active      Boolean     @default(false)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  images     ProductImage[]
+  cartItems  CartItem[]
+  orderItems OrderItem[]
+
+  @@index([kind, active])
+  @@index([brand])
+  @@map("products")
+}
+
+model ProductImage {
+  id        String  @id @default(cuid())
+  productId String
+  path      String
+  alt       String?
+  position  Int     @default(0)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@map("product_images")
+}
+
+// Server-side cart. Anonymous carts are keyed by a cookie token and are
+// claimed by the user on login.
+model Cart {
+  id         String   @id @default(cuid())
+  token      String   @unique
+  userId     String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  items CartItem[]
+
+  @@index([userId])
+  @@map("carts")
+}
+
+model CartItem {
+  id        String @id @default(cuid())
+  cartId    String
+  productId String
+  quantity  Int    @default(1)
+
+  cart    Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([cartId, productId])
+  @@index([productId])
+  @@map("cart_items")
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  FULFILLED
+  CANCELLED
+  REFUNDED
+}
+
+model Order {
+  id          String      @id @default(cuid())
+  orderNumber String      @unique
+  userId      String?
+  email       String
+  status      OrderStatus @default(PENDING)
+  subtotalMinor Int
+  shippingMinor Int       @default(0)
+  totalMinor    Int
+  currency      String    @default("GBP") @db.Char(3)
+
+  stripeCheckoutSessionId String? @unique
+  stripePaymentIntentId   String? @unique
+
+  shippingName    String?
+  shippingLine1   String?
+  shippingLine2   String?
+  shippingCity    String?
+  shippingPostcode String?
+  shippingCountry String?
+
+  paidAt    DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user  User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  items OrderItem[]
+
+  @@index([userId])
+  @@index([status])
+  @@map("orders")
+}
+
+model OrderItem {
+  id             String @id @default(cuid())
+  orderId        String
+  productId      String?
+  // Snapshots — the order must stay readable if the product changes or goes.
+  nameSnapshot   String
+  skuSnapshot    String
+  unitPriceMinor Int
+  quantity       Int
+
+  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+// Stripe delivers webhooks at least once — this table makes handling idempotent.
+model ProcessedWebhook {
+  id          String   @id
+  type        String
+  processedAt DateTime @default(now())
+
+  @@map("processed_webhooks")
+}

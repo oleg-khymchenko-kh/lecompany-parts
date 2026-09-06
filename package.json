@@ -1,0 +1,19 @@
+{
+  "name": "lecompany-parts",
+  "private": true,
+  "version": "0.1.0",
+  "description": "parts.lecompany.co.uk — PCB repair, spare parts and refurbished machines",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "build": "npm run build --workspace @parts/shared && npm run build --workspace @parts/api && npm run build --workspace @parts/web",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  }
+}

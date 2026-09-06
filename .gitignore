@@ -1,0 +1,20 @@
+node_modules/
+.next/
+dist/
+build/
+out/
+*.tsbuildinfo
+
+.env
+.env.*
+!.env.example
+
+npm-debug.log*
+yarn-error.log*
+.DS_Store
+Thumbs.db
+
+.deploy-stage/
+
+# Prisma generates typed client sources into the workspace.
+apps/api/src/generated/
