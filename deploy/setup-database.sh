@@ -8,8 +8,8 @@
 # password itself, and writes DATABASE_URL straight into the API's .env.
 # Nothing secret has to be typed into a chat or pasted anywhere.
 #
-# It asks for the MySQL root password once, interactively — that value is never
-# stored or echoed.
+# The MySQL root password comes from MYSQL_ROOT_PASSWORD if it is set, and is
+# prompted for otherwise. Either way it is never stored or echoed.
 
 set -euo pipefail
 
@@ -17,18 +17,26 @@ DB_NAME="parts_prod"
 DB_USER="parts_user"
 ENV_FILE="/home/parts.lecompany.co.uk/server/.env"
 
+if [[ -n "${MYSQL_ROOT_PASSWORD:-}" ]]; then
+  export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"
+  ROOT_AUTH=(-u root)
+else
+  ROOT_AUTH=(-u root -p)
+fi
+
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "error: $ENV_FILE does not exist" >&2
   exit 1
 fi
 
-# 32 URL-safe characters. Deliberately excludes characters that would need
-# percent-encoding inside a connection URL.
-DB_PASSWORD="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32)"
+# 48 hex characters. Hex rather than base64 so nothing in the password needs
+# percent-encoding inside the connection URL. Not a `tr </dev/urandom | head`
+# pipeline: head closing the pipe early makes that fail under `set -o pipefail`.
+DB_PASSWORD="$(openssl rand -hex 24)"
 
-echo "Creating ${DB_NAME} and ${DB_USER}. Enter the MySQL root password when asked."
+echo "Creating ${DB_NAME} and ${DB_USER}."
 
-mysql -u root -p <<SQL
+mysql "${ROOT_AUTH[@]}" <<SQL
 CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\`
   CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 CREATE USER IF NOT EXISTS '${DB_USER}'@'127.0.0.1' IDENTIFIED BY '${DB_PASSWORD}';
@@ -38,7 +46,7 @@ FLUSH PRIVILEGES;
 SQL
 
 # Prisma Migrate needs a scratch database to diff against.
-mysql -u root -p <<SQL
+mysql "${ROOT_AUTH[@]}" <<SQL
 CREATE DATABASE IF NOT EXISTS \`${DB_NAME}_shadow\`
   CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 GRANT ALL PRIVILEGES ON \`${DB_NAME}_shadow\`.* TO '${DB_USER}'@'127.0.0.1';

@@ -54,7 +54,7 @@ gives a 526.
 ```
 
 Builds locally, ships one tarball over a single SSH connection, swaps the
-directories keeping `<dir>.bak.<stamp>` for the last three releases, then
+directories keeping the last three releases as `<dir>.bak.<stamp>`, then
 `pm2 reload`. Production holds no sources and no repo access, by the owner's
 standing requirement.
 
@@ -67,18 +67,49 @@ a retry, not four `scp` calls.
 
 ## Database
 
-MySQL root needs a password on this box (no `auth_socket`, no `/root/.my.cnf`,
-no `/etc/mysql/debian.cnf`). The `lecompany_user` account has rights only on its
-own schema, so it cannot create ours.
+`parts_prod` and `parts_prod_shadow`, user `parts_user@127.0.0.1`, created by
+`deploy/setup-database.sh`, which generates the password on the server itself so
+it never travels through a chat or a command line here.
 
-Migrations are run from the development machine over an SSH tunnel; the Prisma
-CLI is never installed on production.
+MySQL 8.4 authenticates with `caching_sha2_password`, which on a non-TLS
+connection needs `allowPublicKeyRetrieval`. It is set explicitly in
+`apps/api/src/db.ts` rather than in the URL, and is only acceptable because the
+database is loopback-bound and 3306 is firewalled.
 
-## Outstanding
+Migrations run from the development machine over an SSH tunnel — the Prisma CLI
+is never installed on production:
 
-- MySQL root credentials → create `parts_prod` and its user
-- Real Stripe keys (secret + webhook signing secret)
-- SMTP credentials for magic-link and receipt email
-- **MySQL is listening on `*:3306` with no firewall and is reachable from the
-  public internet.** Verified from outside 2026-09-06. Not changed — it affects
-  the live `app.lecompany.co.uk` database and needs the owner's go-ahead.
+```bash
+ssh -f -N -L 13306:127.0.0.1:3306 lecompany-server
+cd apps/api
+DATABASE_URL="<server url, port 13306>?allowPublicKeyRetrieval=true" npx prisma migrate deploy
+```
+
+## Email
+
+SendGrid over the v3 HTTP API, called with plain `fetch` — no SMTP and no
+nodemailer, so there is nothing extra to bundle.
+
+The SendGrid account has domain authentication for `autoe.co.uk` and
+`autoenterprise.co.uk` **only**. `lecompany.co.uk` is not authenticated, and its
+one verified sender is `office@lecompany.co.uk`. Until the domain is
+authenticated, any `MAIL_FROM` on `parts.lecompany.co.uk` will be rejected.
+
+## Security state
+
+- 3306 and 33060 are dropped for anything but loopback (iptables, persisted with
+  netfilter-persistent). Confirmed closed from outside on 2026-09-06; before
+  that the MySQL banner was being served to the public internet.
+- MySQL still binds `*:3306` rather than 127.0.0.1. The firewall covers it. The
+  bind-address change needs a mysqld restart, which briefly interrupts
+  `app.lecompany.co.uk`, so it has not been done.
+- **The MySQL root password is sitting in `/root/.bash_history` in plaintext**,
+  which is how it was recovered. It should be rotated and the line removed.
+- The SendGrid key in `.env` is a **full-access** key, including
+  `api_keys.create`. A restricted Mail-Send-only key would be safer.
+
+## Verified working end to end (2026-09-06)
+
+Registration, session cookie, `/auth/me`, server-side cart, and Stripe Checkout
+session creation were all exercised against production and then the test rows
+were deleted. Stripe is on **live** keys.

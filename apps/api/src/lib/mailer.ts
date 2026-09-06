@@ -1,20 +1,18 @@
-import nodemailer from 'nodemailer';
 import { env, isProduction } from '../env.js';
 
-// Without SMTP configured mail is logged instead of sent. That keeps local
-// development working and makes a misconfigured production box loud, not silent.
-const transport =
-  env.SMTP_HOST && env.SMTP_PORT
-    ? nodemailer.createTransport({
-        host: env.SMTP_HOST,
-        port: env.SMTP_PORT,
-        secure: env.SMTP_PORT === 465,
-        auth:
-          env.SMTP_USER && env.SMTP_PASSWORD
-            ? { user: env.SMTP_USER, pass: env.SMTP_PASSWORD }
-            : undefined,
-      })
-    : null;
+const SENDGRID_ENDPOINT = 'https://api.sendgrid.com/v3/mail/send';
+
+type Address = { email: string; name?: string };
+
+/** Accepts either `someone@example.com` or `Name <someone@example.com>`. */
+function parseAddress(value: string): Address {
+  const match = /^\s*(.*?)\s*<\s*([^>]+)\s*>\s*$/.exec(value);
+  if (!match) return { email: value.trim() };
+
+  const name = match[1]?.replace(/^"|"$/g, '').trim();
+  const email = match[2]!.trim();
+  return name ? { email, name } : { email };
+}
 
 export async function sendMail(options: {
   to: string;
@@ -22,15 +20,51 @@ export async function sendMail(options: {
   text: string;
   html?: string;
 }): Promise<void> {
-  if (!transport) {
+  // Without a key, mail is logged rather than sent. That keeps local
+  // development working and makes a misconfigured production box loud.
+  if (!env.SENDGRID_API_KEY) {
     if (isProduction) {
-      throw new Error('SMTP is not configured but mail delivery was attempted');
+      throw new Error('SENDGRID_API_KEY is not set but mail delivery was attempted');
     }
-    console.log('\n--- mail (not sent, no SMTP) ---');
+    console.log('\n--- mail (not sent, no SendGrid key) ---');
     console.log(`to: ${options.to}\nsubject: ${options.subject}\n\n${options.text}`);
     console.log('--- end mail ---\n');
     return;
   }
 
-  await transport.sendMail({ from: env.MAIL_FROM, ...options });
+  const personalization: Record<string, unknown> = { to: [{ email: options.to }] };
+  if (env.MAIL_BCC) {
+    // SendGrid rejects a personalization where the same address appears twice.
+    const bcc = parseAddress(env.MAIL_BCC).email;
+    if (bcc.toLowerCase() !== options.to.toLowerCase()) {
+      personalization.bcc = [{ email: bcc }];
+    }
+  }
+
+  const content: Array<{ type: string; value: string }> = [
+    { type: 'text/plain', value: options.text },
+  ];
+  if (options.html) content.push({ type: 'text/html', value: options.html });
+
+  const response = await fetch(SENDGRID_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${env.SENDGRID_API_KEY}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      personalizations: [personalization],
+      from: parseAddress(env.MAIL_FROM),
+      subject: options.subject,
+      content,
+    }),
+    signal: AbortSignal.timeout(15_000),
+  });
+
+  if (!response.ok) {
+    // SendGrid puts the actual reason in the body; a bare status is useless
+    // when a sender identity is unverified, which is the usual first failure.
+    const detail = await response.text().catch(() => '');
+    throw new Error(`SendGrid rejected the message (${response.status}): ${detail.slice(0, 500)}`);
+  }
 }

@@ -15,11 +15,13 @@ const schema = z.object({
   STRIPE_SECRET_KEY: z.string().min(1),
   STRIPE_WEBHOOK_SECRET: z.string().min(1),
 
-  SMTP_HOST: z.string().optional(),
-  SMTP_PORT: z.coerce.number().int().positive().optional(),
-  SMTP_USER: z.string().optional(),
-  SMTP_PASSWORD: z.string().optional(),
+  SENDGRID_API_KEY: z.string().optional(),
   MAIL_FROM: z.string().default('LE Company Parts <no-reply@parts.lecompany.co.uk>'),
+  // Optional blind copy of every outgoing message, for the office archive.
+  MAIL_BCC: z.string().optional(),
+
+  // Prisma Migrate only; the running server never uses it.
+  SHADOW_DATABASE_URL: z.string().optional(),
 });
 
 // A key left blank in .env arrives as an empty string, not as absent, which
