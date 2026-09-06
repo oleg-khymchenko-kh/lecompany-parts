@@ -92,8 +92,26 @@ nodemailer, so there is nothing extra to bundle.
 
 The SendGrid account has domain authentication for `autoe.co.uk` and
 `autoenterprise.co.uk` **only**. `lecompany.co.uk` is not authenticated, and its
-one verified sender is `office@lecompany.co.uk`. Until the domain is
-authenticated, any `MAIL_FROM` on `parts.lecompany.co.uk` will be rejected.
+one verified sender is `office@lecompany.co.uk` — so that is what `MAIL_FROM`
+uses, by the owner's decision. Any address on `parts.lecompany.co.uk` would be
+rejected until the domain is authenticated, which is still worth doing: it also
+buys proper DKIM alignment, which matters for sign-in links landing in inboxes
+rather than spam.
+
+`MAIL_BCC` sends a blind copy of every message to `ai@lecompany.co.uk`.
+
+## Stripe
+
+Live keys. Webhook endpoint `we_1UCoWgIIOsCbxco0NrWYhmm9` →
+`https://parts.lecompany.co.uk/api/webhooks/stripe`, subscribed to
+`checkout.session.completed` and `checkout.session.expired`, pinned to API
+version `2026-08-26.dahlia` so event payloads match the SDK's typings.
+
+The signing secret is shown by Stripe once, at creation. It is in `.env` and
+nowhere else — recreating the endpoint is the only way to get a new one.
+
+`STRIPE_PUBLISHABLE_KEY` is kept in `.env` but unused: Checkout is redirect-based,
+so the browser never needs it.
 
 ## Security state
 
@@ -110,6 +128,9 @@ authenticated, any `MAIL_FROM` on `parts.lecompany.co.uk` will be rejected.
 
 ## Verified working end to end (2026-09-06)
 
-Registration, session cookie, `/auth/me`, server-side cart, and Stripe Checkout
-session creation were all exercised against production and then the test rows
-were deleted. Stripe is on **live** keys.
+Exercised against production, with the test rows deleted afterwards:
+registration, session cookie, `/auth/me`, server-side cart, Stripe Checkout
+session creation, webhook signature rejection (unsigned and badly signed both
+give 400, not a 500), and a real magic-link email delivered through SendGrid.
+
+Not exercised: an actual payment. That would be a real charge on live keys.
