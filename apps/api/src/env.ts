@@ -22,7 +22,13 @@ const schema = z.object({
   MAIL_FROM: z.string().default('LE Company Parts <no-reply@parts.lecompany.co.uk>'),
 });
 
-const parsed = schema.safeParse(process.env);
+// A key left blank in .env arrives as an empty string, not as absent, which
+// makes every optional field fail its own validation. Treat blank as unset.
+const supplied = Object.fromEntries(
+  Object.entries(process.env).filter(([, value]) => value !== undefined && value !== ''),
+);
+
+const parsed = schema.safeParse(supplied);
 
 if (!parsed.success) {
   const issues = parsed.error.issues
